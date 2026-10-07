@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/logo.png" alt="MCP Sentry logo" width="420">
+</p>
+
 # MCP Sentry
 
 Audit MCP tool definitions, recorded tool calls and integration permissions, offline.
