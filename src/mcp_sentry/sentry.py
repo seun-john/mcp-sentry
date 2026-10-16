@@ -8,6 +8,7 @@ should block.
 from __future__ import annotations
 
 import re
+import unicodedata
 from typing import Any
 
 from .core import InputError, digest, finding, report, require
@@ -26,6 +27,62 @@ INSTRUCTION_SHAPED = re.compile(
 )
 # Zero-width and bidi controls, and the Unicode "tag" block that can smuggle ASCII invisibly.
 HIDDEN = re.compile("[​-‏‪-‮⁠-⁤﻿\U000e0000-\U000e007f]")
+JOINERS = "‌‍"  # zero-width non-joiner and joiner
+
+
+def _joins_naturally(text: str, i: int) -> bool:
+    """Is the joiner at text[i] doing its normal job rather than hiding something?
+
+    ZWNJ is part of ordinary spelling in Persian, Urdu, Kurdish and Pashto, and ZWNJ/ZWJ
+    shape conjuncts in the Indic scripts. ZWJ glues emoji into one sequence. In all of these
+    both neighbours belong to the same non-Latin script (or are emoji). Next to Latin
+    letters, digits or spaces it has no such job, so it stays flagged.
+    """
+    before = text[i - 1] if i > 0 else ""
+    after = text[i + 1] if i + 1 < len(text) else ""
+    if not before or not after:
+        return False
+    if _is_emoji_part(before) and _is_emoji_part(after):
+        return True
+    script_before, script_after = _script(before), _script(after)
+    return script_before is not None and script_before == script_after
+
+
+_JOINER_SCRIPTS = {
+    "ARABIC", "DEVANAGARI", "BENGALI", "GURMUKHI", "GUJARATI", "ORIYA", "TAMIL", "TELUGU",
+    "KANNADA", "MALAYALAM", "SINHALA", "THAI", "KHMER", "MYANMAR", "SYRIAC", "THAANA",
+}  # fmt: skip
+
+
+def _script(ch: str) -> str | None:
+    if not ch.isalpha() and not unicodedata.category(ch).startswith("M"):
+        return None
+    try:
+        first = unicodedata.name(ch).split()[0]
+    except ValueError:
+        return None
+    return first if first in _JOINER_SCRIPTS else None
+
+
+def _is_emoji_part(ch: str) -> bool:
+    cp = ord(ch)
+    return (
+        0x1F000 <= cp <= 0x1FAFF
+        or 0x2600 <= cp <= 0x27BF
+        or 0x2300 <= cp <= 0x23FF
+        or cp in (0xFE0F, 0x2764, 0x2640, 0x2642, 0x2695, 0x2696, 0x2708)
+        or 0x1F3FB <= cp <= 0x1F3FF
+    )
+
+
+def has_hidden_text(text: str) -> bool:
+    """Invisible controls that can hide instructions, ignoring joiners that are doing their job."""
+    for match in HIDDEN.finditer(text):
+        ch = match.group()
+        if ch in JOINERS and _joins_naturally(text, match.start()):
+            continue
+        return True
+    return False
 
 
 def _strings(value: Any, path: str = "") -> list[tuple[str, str]]:
@@ -48,6 +105,47 @@ def fingerprint(tool: dict[str, Any]) -> str:
     return digest(tool)
 
 
+def _definitions(value: Any) -> dict[str, dict[str, Any]]:
+    """`approved_definitions` may be a list of tool objects or an object keyed by tool name."""
+    if isinstance(value, list):
+        return {
+            t["name"]: t for t in value if isinstance(t, dict) and isinstance(t.get("name"), str)
+        }
+    if isinstance(value, dict):
+        return {k: v for k, v in value.items() if isinstance(v, dict)}
+    raise InputError("'approved_definitions' must be a list of tools or an object keyed by name")
+
+
+def _clip(value: Any, width: int = 200) -> Any:
+    return value[:width] + "..." if isinstance(value, str) and len(value) > width else value
+
+
+def describe_changes(old: Any, new: Any, path: str = "") -> list[dict[str, Any]]:
+    """What differs between an approved definition and the current one.
+
+    Appended wording is reported as `extended` with the added text, so a reviewer reads the
+    new sentence instead of a changed hash. This describes the change; it does not judge
+    whether the change is harmless.
+    """
+    where = path or "definition"
+    if isinstance(old, dict) and isinstance(new, dict):
+        changes: list[dict[str, Any]] = []
+        for key in sorted(set(old) | set(new)):
+            sub = f"{path}.{key}" if path else str(key)
+            if key not in old:
+                changes.append({"where": sub, "change": "added", "value": _clip(new[key])})
+            elif key not in new:
+                changes.append({"where": sub, "change": "removed", "value": _clip(old[key])})
+            else:
+                changes.extend(describe_changes(old[key], new[key], sub))
+        return changes
+    if old == new:
+        return []
+    if isinstance(old, str) and isinstance(new, str) and new.startswith(old):
+        return [{"where": where, "change": "extended", "added_text": _clip(new[len(old) :])}]
+    return [{"where": where, "change": "edited", "before": _clip(old), "after": _clip(new)}]
+
+
 def baseline(data: dict[str, Any]) -> dict[str, str]:
     """Approved fingerprints for every tool in `data['tools']`."""
     result: dict[str, str] = {}
@@ -65,6 +163,7 @@ def mcpsentry(data: dict[str, Any]) -> dict[str, Any]:
     policy = data.get("policy", {})
     if not isinstance(approved, dict) or not isinstance(policy, dict):
         raise InputError("'baseline' and 'policy' must be objects")
+    definitions = _definitions(data.get("approved_definitions", {}))
     out: list[dict[str, Any]] = []
     fingerprints: dict[str, str] = {}
     for tool in tools:
@@ -83,16 +182,20 @@ def mcpsentry(data: dict[str, Any]) -> dict[str, Any]:
                 )
             )
         elif approved[name] != fp:
+            detail: dict[str, Any] = {}
+            if name in definitions:
+                detail["changes"] = describe_changes(definitions[name], tool)
             out.append(
                 finding(
                     "CHANGED",
                     "Definition differs from the approved fingerprint (possible rug pull).",
                     tool=name,
                     fingerprint=fp,
+                    **detail,
                 )
             )
         for where, text in _strings({k: v for k, v in tool.items() if k != "name"}):
-            if HIDDEN.search(text):
+            if has_hidden_text(text):
                 out.append(
                     finding(
                         "HIDDEN_TEXT",
@@ -154,7 +257,7 @@ def _decide(
         if rule.get("side_effect") is True and not call.get("approval_id"):
             reasons.append("approval reference required (it is not authenticated here)")
     result_text = str(call.get("result", ""))
-    if INSTRUCTION_SHAPED.search(result_text) or HIDDEN.search(result_text):
+    if INSTRUCTION_SHAPED.search(result_text) or has_hidden_text(result_text):
         reasons.append("instruction-shaped or hidden text in the result")
     clean, _ = redact(result_text)
     return {

@@ -47,10 +47,10 @@ mcp-sentry scan scan.json -o report.json --html report.html --strict
 | Status | Meaning |
 | --- | --- |
 | `UNAPPROVED` | No approved fingerprint for this tool. |
-| `CHANGED` | The definition differs from the approved fingerprint. |
+| `CHANGED` | The definition differs from the approved fingerprint. Add `"approved_definitions"` (the tool list you approved, as an array or an object keyed by name) and the finding carries `changes`: what was added, removed, edited, or appended to a description, with the new wording. This describes the change; it does not decide whether the change is harmless, so a changed definition is always reported. |
 | `MISSING` | An approved tool is no longer offered. |
 | `SUSPICIOUS` | Text in the description or schema looks like an instruction to the model ("ignore previous instructions", "do not tell the user", "read ~/.ssh/id_rsa", `<IMPORTANT>`, "send the API key"). |
-| `HIDDEN_TEXT` | Zero-width, bidirectional-control or Unicode tag characters, which can hide instructions from a human reader. |
+| `HIDDEN_TEXT` | Zero-width, bidirectional-control or Unicode tag characters, which can hide instructions from a human reader. A zero-width joiner or non-joiner is ignored when both neighbours are in the same joining script (Arabic-script languages such as Persian, the Indic scripts, Thai, Khmer, Myanmar and similar) or are emoji, because it is part of normal spelling there. Next to Latin letters, digits or spaces, or at the start or end of a string, it is still reported, and every other invisible character is always reported. |
 
 Every string in the definition is scanned, including nested schema descriptions, and the finding says where it was found.
 
