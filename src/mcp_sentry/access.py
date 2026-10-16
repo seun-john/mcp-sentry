@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from .core import InputError, finding, report, require
+from .core import InputError, coverage, finding, report, require
 
 ACTIONS = {
     "read": "Read the resource",
@@ -101,9 +101,16 @@ def accessmap(data: dict[str, Any]) -> dict[str, Any]:
                     requested_use=item["requested_use"],
                 )
             )
+    unknown = sum(1 for f in out if f["status"] == "UNKNOWN_PERMISSION")
     return report(
         "MCP Sentry Access Map",
         out,
+        coverage=coverage(
+            "permissions",
+            len(capabilities) + unknown,
+            len(capabilities),
+            {"unknown_action": unknown},
+        ),
         capabilities=capabilities,
         scope="translates a permission inventory you supply; no account is inspected or enforced",
     )

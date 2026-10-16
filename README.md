@@ -80,7 +80,9 @@ Declared permissions become plain-language capabilities. Broad resources (`*`, `
 
 ## Options and exit codes
 
-All commands take `-o report.json`, `--html report.html` and `--strict`. Exit codes: 0 the audit completed, 1 `--strict` and something was flagged, 2 unusable input. A completed audit with findings exits 0 unless you pass `--strict`, so use `--strict` in CI.
+All commands take `-o report.json`, `--html report.html` and `--strict`. Exit codes: 0 the audit completed, 1 `--strict` and something was flagged, 2 unusable input, 3 `--min-coverage` was not met. A completed audit with findings exits 0 unless you pass `--strict`, so use `--strict` in CI.
+
+**Coverage.** `scan` and `access` add a `coverage` object and print a line on stderr, for example `coverage: decided 12 of 12 tools`. For `scan` every tool is examined, so the numbers are the tool count; the `notes` say what the scan cannot see (paraphrased instructions) and, when no baseline was given, that changes since approval were not checked. For `access` the items are the declared actions; an action with no interpretation is undecided (`unknown_action`). `--min-coverage PCT` exits 3 when fewer than PCT percent of items were decided and nothing else failed.
 
 ## Limits
 

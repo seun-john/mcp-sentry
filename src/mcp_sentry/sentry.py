@@ -11,7 +11,7 @@ import re
 import unicodedata
 from typing import Any
 
-from .core import InputError, digest, finding, report, require
+from .core import InputError, coverage, digest, finding, report, require
 from .redact import redact
 
 INSTRUCTION_SHAPED = re.compile(
@@ -221,9 +221,16 @@ def mcpsentry(data: dict[str, Any]) -> dict[str, Any]:
     decisions = []
     for call in data.get("calls", []):
         decisions.append(_decide(call, fingerprints, approved, policy))
+    notes = [
+        "definitions were scanned for instruction-shaped text and hidden characters; "
+        "paraphrased instructions are not detected"
+    ]
+    if not approved:
+        notes.append("no baseline was supplied, so changes since approval were not checked")
     return report(
         "MCP Sentry",
         out,
+        coverage=coverage("tools", len(tools), len(tools), notes=notes),
         fingerprints=fingerprints,
         decisions=decisions,
         scope="offline decisions only; does not intercept calls or sandbox tools",

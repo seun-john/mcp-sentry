@@ -286,6 +286,59 @@ def test_access_map_rejects_duplicate_ids_and_bad_types() -> None:
         )
 
 
+def test_scan_coverage_counts_every_tool_and_says_what_was_not_checked() -> None:
+    block = mcpsentry({"tools": [tool("a"), tool("b"), tool("c")]})["coverage"]
+    assert (block["unit"], block["items"], block["decided"], block["undecided"]) == (
+        "tools",
+        3,
+        3,
+        0,
+    )
+    assert any("paraphrased" in n for n in block["notes"])
+    assert any("no baseline" in n for n in block["notes"])
+
+
+def test_scan_with_a_baseline_does_not_claim_changes_were_skipped() -> None:
+    tools = [tool("a")]
+    block = mcpsentry({"tools": tools, "baseline": baseline({"tools": tools})})["coverage"]
+    assert not any("no baseline" in n for n in block["notes"])
+
+
+def test_access_map_coverage_separates_known_and_unknown_actions() -> None:
+    data = {
+        "integrations": [
+            {
+                "id": "mail",
+                "permissions": [{"resource": "inbox", "actions": ["read", "teleport", "send"]}],
+            },
+            {"id": "empty", "permissions": []},
+        ]
+    }
+    block = accessmap(data)["coverage"]
+    assert (block["unit"], block["items"], block["decided"], block["undecided"]) == (
+        "permissions",
+        3,
+        2,
+        1,
+    )
+    assert block["reasons"] == {"unknown_action": 1}
+    assert sum(block["reasons"].values()) == block["undecided"]
+
+
+def test_cli_min_coverage_and_summary_line(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    src = tmp_path / "inv.json"
+    perms = [{"resource": "x", "actions": ["read", "teleport"]}]
+    src.write_text(json.dumps({"integrations": [{"id": "m", "permissions": perms}]}), "utf-8")
+    out = str(tmp_path / "r.json")
+    assert main(["access", str(src), "-o", out, "--min-coverage", "50"]) == 0
+    assert "coverage: decided 1 of 2 permissions; 1 could not be checked" in (
+        capsys.readouterr().err
+    )
+    assert main(["access", str(src), "-o", out, "--min-coverage", "51"]) == 3
+
+
 def test_cli_baseline_then_scan_strict(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     tools = tmp_path / "tools.json"
     tools.write_text(json.dumps({"tools": [tool()]}), encoding="utf-8")
